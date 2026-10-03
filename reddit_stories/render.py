@@ -31,9 +31,20 @@ def duration(path: Path) -> float:
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
 
 
+TAIL = 0.4   # пауза после последнего слова
+
+
+def speed_up(audio: Path, factor: float) -> None:
+    """Ускоряет озвучку без изменения высоты голоса."""
+    tmp = audio.with_name("voice_fast.mp3")
+    subprocess.run([_ffmpeg(), "-y", "-loglevel", "error", "-i", str(audio),
+                    "-filter:a", f"atempo={factor:.4f}", str(tmp)], check=True)
+    tmp.replace(audio)
+
+
 def render(job: Path) -> Path:
     audio = job / "voice.mp3"
-    dur = duration(audio) + 0.4
+    dur = min(duration(audio) + TAIL, config.MAX_SECONDS)
 
     # относительные пути — чтобы не экранировать «C:» на Windows внутри фильтра
     fontsdir = os.path.relpath(config.FONTS_DIR, job).replace("\\", "/")

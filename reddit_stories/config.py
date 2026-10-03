@@ -76,6 +76,9 @@ LINE_CHARS = 13                      # фраза длиннее — перен�
 HIGHLIGHT = "&H0000E6FF&"            # цвет произносимого слова, формат ASS: &H00BBGGRR& (тут жёлтый)
 # фон, когда в backgrounds/ нет видео: aurora / bokeh / warp / random
 BACKGROUND_STYLE = "random"
+MAX_SECONDS = 55                     # ролик строго не длиннее этого
+MAX_WORDS = 130                      # сценарий длиннее — просим модель сократить
+MAX_SPEEDUP = 1.3                    # во сколько раз можно ускорить озвучку, чтобы уложиться
 TITLE_SECONDS = 3.0                  # сколько висит плашка с заголовком в начале
 
 OUT_DIR = ROOT / "out"

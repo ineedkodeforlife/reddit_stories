@@ -115,6 +115,18 @@ def _voice(job: Path, script: str) -> list[dict]:
             return cached["words"]
     print("  озвучка...")
     words = tts.synthesize(script, audio)
+    # ролик должен уложиться в MAX_SECONDS: если озвучка длиннее — ускоряем её
+    limit = config.MAX_SECONDS - rnd.TAIL - 0.3
+    factor = rnd.duration(audio) / limit
+    if factor > config.MAX_SPEEDUP:
+        audio.unlink()
+        raise RuntimeError(f"текст слишком длинный: {len(script.split())} слов, "
+                           f"сократи script примерно до {config.MAX_WORDS}")
+    if factor > 1:
+        print(f"  ускоряю озвучку в {factor:.2f} раза, чтобы уложиться в {config.MAX_SECONDS} c")
+        rnd.speed_up(audio, factor)
+        scale = rnd.duration(audio) / (limit * factor)   # по факту, а не по расчёту
+        words = [{**w, "start": w["start"] * scale, "end": w["end"] * scale} for w in words]
     wfile.write_text(json.dumps({"hash": h, "words": words}, ensure_ascii=False), encoding="utf-8")
     return words
 

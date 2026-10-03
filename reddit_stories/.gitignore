@@ -1,0 +1,7 @@
+.env
+out/*
+!out/.gitkeep
+backgrounds/*
+!backgrounds/.gitkeep
+__pycache__/
+cache/

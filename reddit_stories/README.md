@@ -54,7 +54,7 @@ python main.py render out/abc123                # перерендер одно�
 
 ## Каждый день автоматически (GitHub Actions)
 
-`python main.py daily --n 2` делает всё сразу: сценарии → рендер → Telegram. Файл `.github/workflows/daily.yml` запускает это каждый день в 06:00 UTC.
+`python main.py daily --n 2` делает всё сразу: сценарии → рендер → Telegram. Файл `.github/workflows/daily.yml` (лежит в корне репозитория, на уровень выше папки `reddit_stories`) запускает это каждый день в 06:00 UTC.
 
 1. Выложи проект на GitHub (репозиторий лучше приватный):
    ```

@@ -18,6 +18,7 @@ import config
 
 ATOM = {"a": "http://www.w3.org/2005/Atom"}
 ARCTIC = "https://arctic-shift.photon-reddit.com/api/posts/ids"
+ARCTIC_COMMENTS = "https://arctic-shift.photon-reddit.com/api/comments/ids"
 _next_ok = 0.0   # когда Reddit разрешит следующий запрос
 
 
@@ -108,7 +109,7 @@ def fetch_thread(id_or_url: str) -> tuple[dict, list[dict]]:
     m = re.search(r"/comments/(\w+)", id_or_url)
     post_id = m.group(1) if m else id_or_url
     entries = [_entry(e) for e in _rss(f"https://www.reddit.com/comments/{post_id}.rss",
-                                       {"sort": "top", "limit": 100})]
+                                       {"sort": "top", "limit": 200, "depth": 1})]
     post = next(e for e in entries if e["kind"] == "t3")
     return post, [e for e in entries if e["kind"] == "t1"]
 
@@ -122,13 +123,28 @@ def fetch_post(id_or_url: str) -> dict:
     return post
 
 
-def top_comments(comments: list[dict]) -> list[str]:
+def top_comments(comments: list[dict]) -> list[dict]:
+    """Лучшие короткие комментарии верхнего уровня: автор, текст, рейтинг."""
     lo, hi = config.COMMENT_CHARS
-    good = [c["selftext"] for c in comments
+    good = [c for c in comments
             if c["author"] not in ("", "AutoModerator")
             and lo <= len(c["selftext"]) <= hi
             and c["selftext"] not in ("[removed]", "[deleted]")]
-    return good[: config.MAX_COMMENTS]
+    # RSS не говорит, ответ это на пост или на другой комментарий, и не даёт рейтинг — берём из Arctic Shift
+    try:
+        r = requests.get(ARCTIC_COMMENTS, params={"ids": ",".join(c["id"] for c in good),
+                                                  "fields": "id,score,parent_id"},
+                         headers={"User-Agent": config.REDDIT_USER_AGENT}, timeout=30)
+        r.raise_for_status()
+        info = {d["id"]: d for d in r.json()["data"]}
+        good = [c for c in good if info.get(c["id"], {}).get("parent_id", "t3_").startswith("t3_")]
+        for c in good:
+            c["score"] = info.get(c["id"], {}).get("score")
+        good.sort(key=lambda c: c["score"] or 0, reverse=True)
+    except Exception as e:
+        print(f"  [arctic] рейтинг комментариев недоступен: {e}")
+    return [{"author": c["author"], "text": c["selftext"], "score": c["score"]}
+            for c in good[: config.MAX_COMMENTS]]
 
 
 def _common_ok(p: dict) -> bool:

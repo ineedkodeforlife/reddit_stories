@@ -17,6 +17,7 @@ import re
 import sys
 from pathlib import Path
 
+import cards
 import config
 import reddit_fetch
 import render as rnd
@@ -91,7 +92,7 @@ def cmd_scripts(args):
             print(f"  пропуск: {s.get('skip_reason')}")
             continue
         s["kind"] = "discussion" if p.get("comments") else "story"
-        s["source"] = {"id": p["id"], "subreddit": p["subreddit"], "score": p["score"],
+        s["source"] = {"id": p["id"], "subreddit": p["subreddit"], "score": p["score"], "author": p["author"],
                        "url": "https://www.reddit.com" + p["permalink"], "title": p["title"]}
         job = config.OUT_DIR / p["id"]
         job.mkdir(parents=True, exist_ok=True)
@@ -111,7 +112,7 @@ def _voice(job: Path, script: str) -> list[dict]:
     wfile, audio = job / "words.json", job / "voice.mp3"
     if wfile.exists() and audio.exists():
         cached = json.loads(wfile.read_text(encoding="utf-8"))
-        if cached.get("hash") == h:
+        if cached.get("hash") == h and all("pos" in w for w in cached["words"]):
             return cached["words"]
     print("  озвучка...")
     words = tts.synthesize(script, audio)
@@ -141,10 +142,14 @@ def cmd_render(args):
         s = json.loads((job / "script.json").read_text(encoding="utf-8"))
         print(f"→ {job.name}: {s['title']}")
         try:
-            words = _voice(job, s["script"])
-            subtitles.write_ass(words, s["title"], job / "subs.ass")
+            if s.get("comments"):   # обсуждение: карточки Reddit вместо субтитров
+                words = _voice(job, cards.build_script(s))
+                cards.build(job, s, words, rnd.duration(job / "voice.mp3") + rnd.TAIL)
+            else:
+                words = _voice(job, s["script"])
+                subtitles.write_ass(words, s["title"], job / "subs.ass")
             print("  монтаж...")
-            out = rnd.render(job)
+            out = rnd.render(job, cards=bool(s.get("comments")))
         except Exception as e:
             print(f"  ошибка: {e}")
             continue

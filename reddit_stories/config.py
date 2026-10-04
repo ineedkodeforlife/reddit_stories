@@ -39,8 +39,8 @@ PER_SUB = 3                 # сколько лучших постов брат�
 
 # --- обсуждения: вопрос из заголовка + лучшие ответы из комментариев ---
 DISCUSSION_SUBREDDITS = ["AskReddit", "AskMen", "AskWomen", "NoStupidQuestions"]
-COMMENT_CHARS = (80, 700)   # мин. и макс. длина комментария
-MIN_COMMENTS, MAX_COMMENTS = 4, 8
+COMMENT_CHARS = (40, 450)   # мин. и макс. длина комментария: в ролик до 55 с влезают только короткие
+MIN_COMMENTS, MAX_COMMENTS = 4, 10
 
 CACHE_DIR = ROOT / "cache"  # кеш RSS-лент: у Reddit лимит около запроса в минуту
 CACHE_HOURS = 6

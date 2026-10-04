@@ -13,21 +13,22 @@ import config
 
 
 def words_from_alignment(al: dict) -> list[dict]:
-    words, cur, start, end = [], "", 0.0, 0.0
-    for ch, a, b in zip(al["characters"],
-                        al["character_start_times_seconds"],
-                        al["character_end_times_seconds"]):
+    # pos — позиция слова в исходном тексте, по ней карточки находят начало предложения
+    words, cur, start, end, pos = [], "", 0.0, 0.0, 0
+    for i, (ch, a, b) in enumerate(zip(al["characters"],
+                                       al["character_start_times_seconds"],
+                                       al["character_end_times_seconds"])):
         if ch.isspace():
             if cur:
-                words.append({"text": cur, "start": start, "end": end})
+                words.append({"text": cur, "start": start, "end": end, "pos": pos})
                 cur = ""
             continue
         if not cur:
-            start = a
+            start, pos = a, i
         cur += ch
         end = b
     if cur:
-        words.append({"text": cur, "start": start, "end": end})
+        words.append({"text": cur, "start": start, "end": end, "pos": pos})
     return words
 
 
@@ -78,6 +79,7 @@ def _edge(text: str, out_mp3: Path) -> list[dict]:
     pos = 0
     for w in words:
         i = text.find(w["text"], pos)
+        w["pos"] = i if i >= 0 else pos
         if i < 0:
             continue
         pos = i + len(w["text"])

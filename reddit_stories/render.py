@@ -42,15 +42,22 @@ def speed_up(audio: Path, factor: float) -> None:
     tmp.replace(audio)
 
 
-def render(job: Path) -> Path:
+def render(job: Path, cards: bool = False) -> Path:
+    """cards=True — вместо субтитров накладываем карточки из cards.txt (обсуждения)."""
     audio = job / "voice.mp3"
     dur = min(duration(audio) + TAIL, config.MAX_SECONDS)
 
     # относительные пути — чтобы не экранировать «C:» на Windows внутри фильтра
     fontsdir = os.path.relpath(config.FONTS_DIR, job).replace("\\", "/")
     vf = (f"scale={config.W}:{config.H}:force_original_aspect_ratio=increase,"
-          f"crop={config.W}:{config.H},fps={config.FPS},setsar=1,"
-          f"subtitles=subs.ass:fontsdir={fontsdir}")
+          f"crop={config.W}:{config.H},fps={config.FPS},setsar=1")
+    if cards:
+        video = ["-f", "concat", "-safe", "0", "-i", "cards.txt", "-i", "voice.mp3",
+                 "-filter_complex", f"[0:v]{vf}[bg];[1:v]format=rgba[c];[bg][c]overlay=0:0:eof_action=repeat[v]",
+                 "-map", "[v]", "-map", "2:a:0"]
+    else:
+        video = ["-i", "voice.mp3", "-map", "0:v:0", "-map", "1:a:0",
+                 "-vf", f"{vf},subtitles=subs.ass:fontsdir={fontsdir}"]
 
     cmd = [_ffmpeg(), "-y", "-loglevel", "error"]
     bgs = [p for p in config.BACKGROUNDS_DIR.iterdir() if p.suffix.lower() in VIDEO_EXT]
@@ -70,8 +77,7 @@ def render(job: Path) -> Path:
         print(f"  в backgrounds/ пусто — рисую фон «{style}»")
         cmd += ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{background.BG_W}x{background.BG_H}",
                 "-r", str(config.FPS), "-i", "pipe:0"]
-    cmd += ["-i", "voice.mp3",
-            "-map", "0:v:0", "-map", "1:a:0", "-vf", vf, "-t", f"{dur:.2f}",
+    cmd += video + ["-t", f"{dur:.2f}",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "video.mp4"]
     if not style:

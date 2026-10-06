@@ -32,8 +32,8 @@ def words_from_alignment(al: dict) -> list[dict]:
     return words
 
 
-def _eleven(text: str, out_mp3: Path) -> list[dict]:
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{config.ELEVEN_VOICE_ID}/with-timestamps"
+def _eleven(text: str, out_mp3: Path, voice: str) -> list[dict]:
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice}/with-timestamps"
     r = requests.post(
         url,
         params={"output_format": "mp3_44100_128"},
@@ -49,10 +49,10 @@ def _eleven(text: str, out_mp3: Path) -> list[dict]:
     return words_from_alignment(data["alignment"])
 
 
-async def _edge_stream(text: str, out_mp3: Path) -> list[dict]:
+async def _edge_stream(text: str, out_mp3: Path, voice: str) -> list[dict]:
     import edge_tts
 
-    com = edge_tts.Communicate(text, config.EDGE_VOICE, rate=config.EDGE_RATE,
+    com = edge_tts.Communicate(text, voice, rate=config.EDGE_RATE,
                                boundary="WordBoundary")
     words = []
     with open(out_mp3, "wb") as f:
@@ -65,15 +65,16 @@ async def _edge_stream(text: str, out_mp3: Path) -> list[dict]:
     return words
 
 
-def _edge(text: str, out_mp3: Path) -> list[dict]:
-    for attempt in range(3):   # сервис Edge иногда отвечает пустым аудио — повтор помогает
+def _edge(text: str, out_mp3: Path, voice: str) -> list[dict]:
+    # сервис Edge иногда отвечает пустым аудио, особенно на серию запросов подряд — ждём и повторяем
+    for attempt in range(5):
         try:
-            words = asyncio.run(_edge_stream(text, out_mp3))
+            words = asyncio.run(_edge_stream(text, out_mp3, voice))
             break
         except Exception:
-            if attempt == 2:
+            if attempt == 4:
                 raise
-            time.sleep(3)
+            time.sleep(5 * (attempt + 1))
     # Edge отдаёт слова без пунктуации — возвращаем её из исходного текста,
     # по ней субтитры режутся на фразы
     pos = 0
@@ -89,7 +90,10 @@ def _edge(text: str, out_mp3: Path) -> list[dict]:
     return words
 
 
-def synthesize(text: str, out_mp3: Path) -> list[dict]:
+def synthesize(text: str, out_mp3: Path, gender: str = "") -> list[dict]:
+    """gender — "m" или "f": каким голосом читать; пусто — голосом рассказчика."""
+    gender = gender if gender in config.EDGE_VOICES else config.NARRATOR
     if config.ELEVEN_API_KEY and config.ELEVEN_VOICE_ID:
-        return _eleven(text, out_mp3)
-    return _edge(text, out_mp3)
+        voice = config.ELEVEN_VOICE_ID_F if gender == "f" and config.ELEVEN_VOICE_ID_F else config.ELEVEN_VOICE_ID
+        return _eleven(text, out_mp3, voice)
+    return _edge(text, out_mp3, config.EDGE_VOICES[gender])

@@ -41,17 +41,29 @@ def sentences(text: str) -> list[str]:
 
 
 def _segments(s: dict) -> list[list[str]]:
-    """Вопрос и каждый комментарий, разбитые на предложения."""
+    """Вопрос, каждый комментарий и концовка (если есть), разбитые на предложения."""
     out = []
-    for text in [s["title"]] + [c["text"] for c in s["comments"]]:
+    for text in [s["title"]] + [c["text"] for c in s["comments"]] + [s.get("outro") or ""]:
         text = " ".join(text.split())
-        out.append(sentences(text if text[-1] in ".!?…" else text + "."))
+        if text:
+            out.append(sentences(text if text[-1] in ".!?…" else text + "."))
     return out
 
 
 def build_script(s: dict) -> str:
-    """Текст озвучки: вопрос, затем комментарии подряд."""
+    """Текст озвучки: вопрос, затем комментарии подряд, в конце — концовка."""
     return " ".join(sent for seg in _segments(s) for sent in seg)
+
+
+def voice_segments(s: dict) -> list[tuple[str, str]]:
+    """Те же куски текста с голосом для каждого: вопрос и концовку читает рассказчик,
+    ответы — голос по полу автора, а если пол не указан — голоса чередуются."""
+    genders, prev = [], config.NARRATOR
+    for c in s["comments"]:
+        prev = c.get("gender") if c.get("gender") in ("m", "f") else "f" if prev == "m" else "m"
+        genders.append(prev)
+    genders = [config.NARRATOR] + genders + [config.NARRATOR]
+    return [(" ".join(seg), g) for seg, g in zip(_segments(s), genders)]
 
 
 def split_parts(s: dict) -> list[dict]:
@@ -60,7 +72,7 @@ def split_parts(s: dict) -> list[dict]:
     if len(comments) < 2 * config.PART_COMMENTS[0]:
         return [s]
     half = (len(comments) + 1) // 2
-    return [{**s, "comments": chunk, "part": i}
+    return [{**s, "comments": chunk, "part": i, "outro": config.OUTRO_NEXT if i == 1 else s.get("outro")}
             for i, chunk in enumerate((comments[:half], comments[half:]), 1)]
 
 
@@ -118,8 +130,27 @@ class _Card:
         d.text((X + GUTTER, ty + 22), self.footer, font=_font(26, True), fill=GREY)
 
 
-def build(job: Path, s: dict, words: list[dict], total: float) -> Path:
-    """Рисует все состояния карточек и пишет список для ffmpeg (concat) с таймингами."""
+class _Outro:
+    """Концовка: яркая плашка с призывом, появляется целиком."""
+
+    def __init__(self, d, sents: list[str]):
+        self.font = _font(50, True)
+        self.line_h = 68
+        self.lines = _wrap(d, [(w, 0) for sent in sents for w in sent.split()], self.font, CARD_W - 2 * PAD)
+        self.height = 2 * PAD + len(self.lines) * self.line_h
+
+    def draw(self, d, y: int, upto: int) -> None:
+        d.rounded_rectangle([X, y, X + CARD_W, y + self.height], radius=18, fill=ORANGE)
+        for i, line in enumerate(self.lines):
+            d.text((config.W / 2, y + PAD + (i + 0.5) * self.line_h), " ".join(w for w, _ in line),
+                   font=self.font, fill=WHITE, anchor="mm")
+
+
+def build(job: Path, s: dict, words: list[dict], total: float) -> list[float]:
+    """Рисует все состояния карточек и пишет список для ffmpeg (concat) с таймингами.
+
+    Возвращает моменты появления новых карточек — по ним ставятся щелчки.
+    """
     segs = _segments(s)
     script = build_script(s)
 
@@ -155,6 +186,8 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> Path:
             if TOP + badge_h + question.height + GAP + card.height <= BOTTOM:
                 break
         cards.append(card)
+    if s.get("outro"):   # концовка идёт последним сегментом, после всех комментариев
+        cards.append(_Outro(probe, segs[-1]))
 
     # блок из вопроса и самого высокого комментария ставим чуть выше центра безопасной зоны
     free = BOTTOM - TOP - badge_h - question.height - GAP - max(c.height for c in cards)
@@ -182,14 +215,16 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> Path:
         frames.append((t, name))
 
     frame(0.0, None, 0)
+    pops = []
     for card, row in zip(cards, starts[1:]):
         for k, t in enumerate(row):
             frame(max(t - 0.05, frames[-1][0] + 0.05), card, k)
+            if k == 0:
+                pops.append(frames[-1][0])
 
     lines = []
     for (t, name), (t_next, _) in zip(frames, frames[1:] + [(total + 1, "")]):
         lines += [f"file '{name}'", f"duration {t_next - t:.3f}"]
     lines.append(f"file '{frames[-1][1]}'")   # concat требует повторить последний файл
-    path = job / "cards.txt"
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
+    (job / "cards.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return pops

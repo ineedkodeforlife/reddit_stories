@@ -16,6 +16,7 @@ def _key(name: str) -> str | None:
 GROQ_API_KEY = _key("GROQ_API_KEY")
 ELEVEN_API_KEY = _key("ELEVENLABS_API_KEY")
 ELEVEN_VOICE_ID = _key("ELEVENLABS_VOICE_ID")
+ELEVEN_VOICE_ID_F = _key("ELEVENLABS_VOICE_ID_F")   # женский голос для ответов; нет — всё читает основной
 TELEGRAM_BOT_TOKEN = _key("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _key("TELEGRAM_CHAT_ID")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "")
@@ -39,6 +40,10 @@ PER_SUB = 3                 # сколько лучших постов брат�
 
 # --- обсуждения: вопрос из заголовка + лучшие ответы из комментариев ---
 DISCUSSION_SUBREDDITS = ["AskReddit", "AskMen", "AskWomen", "NoStupidQuestions"]
+# русскоязычные обсуждения идут через одно с переводными; пустой список — только переводные
+RU_DISCUSSION_SUBREDDITS = ["rusAskReddit"]
+SUB_MIN_SCORE = {"rusaskreddit": 150}   # свой порог рейтинга для небольших сабов (имя в нижнем регистре)
+MIN_TITLE_CHARS = 20        # короче — обычно подпись к картинке («Это правда?»), без неё вопрос непонятен
 DISCUSSION_PER_SUB = 6      # кандидатов с саба больше, чем у историй: «американские» темы отсеиваются
 COMMENT_CHARS = (40, 450)   # мин. и макс. длина комментария: в ролик до 55 с влезают только короткие
 # MAX_COMMENTS — сколько ответов показываем модели: с запасом, чтобы было из чего выбрать понятные в России
@@ -56,7 +61,9 @@ LLM_MODELS = [LLM_MODEL, "qwen/qwen3.8-27b", "openai/gpt-oss-20b"]
 
 # --- озвучка ---
 # Есть ключ и голос ElevenLabs в .env — озвучивает ElevenLabs, иначе бесплатный Edge TTS.
-EDGE_VOICE = "ru-RU-DmitryNeural"    # или ru-RU-SvetlanaNeural
+# голоса по полу: "m" читает вопрос и концовку, ответы — голос по полу автора комментария
+EDGE_VOICES = {"m": "ru-RU-DmitryNeural", "f": "ru-RU-SvetlanaNeural"}
+NARRATOR = "m"
 EDGE_RATE = "+12%"
 ELEVEN_MODEL = "eleven_multilingual_v2"
 VOICE_SETTINGS = {
@@ -71,9 +78,31 @@ MAX_PAUSE = 0.18            # паузы длиннее этого (в секу�
 SILENCE_DB = -35            # всё, что тише, считается паузой
 SPEED = 1.08                # во сколько раз ускорить готовую озвучку (1 — не ускорять)
 
+# --- звук ---
+MUSIC_DIR = ROOT / "music"  # свои треки (mp3/wav/m4a/ogg): для ролика берётся случайный файл
+# в music/ пусто — трек подбирается сам: случайный запрос, лицензия CC0, каталог Openverse; пустой список — без музыки
+MUSIC_QUERIES = ["lofi loop", "chill lofi", "lofi beat", "chill beat", "lofi piano"]
+MUSIC_SECONDS = (15, 300)   # мин. и макс. длина трека; короткий зацикливается
+MUSIC_SKIP_WORDS = ["vocal", "voice", "speech", "fx", "sfx", "horror", "scary", "glitch", "noise",
+                    "sad", "melanchol", "somber", "dark", "drama"]   # ролики лёгкие — грустное не берём
+MUSIC_VOLUME = 0.10         # громкость музыки относительно голоса
+POP_VOLUME = 0.5            # громкость щелчка при появлении комментария (0 — без щелчков)
+
+# --- концовка обсуждения: карточка с озвучкой после последнего ответа ---
+OUTRO = "А у вас как? Пишите в комментариях."      # если модель не придумала вопрос по теме
+OUTRO_NEXT = "Продолжение во второй части."         # в конце первой части
+
 # --- видео ---
 W, H, FPS = 1080, 1920, 30
 BACKGROUNDS_DIR = ROOT / "backgrounds"
+# в backgrounds/ пусто и в .env есть PIXABAY_API_KEY — фон склеивается из клипов Pixabay по одному из запросов
+PIXABAY_API_KEY = _key("PIXABAY_API_KEY")
+# поиск Pixabay неточный, поэтому берутся только видео, у которых все слова запроса есть в тегах;
+# эти запросы проверены: по ним много съёмок растекающейся краски и чернил
+STOCK_QUERIES = ["ink in water", "liquid paint", "motion paint", "soap bubbles"]
+STOCK_DIM = 0.78                     # яркость стокового фона (1 — как есть): на светлом фоне белые карточки теряются
+STOCK_CLIP_SECONDS = 8               # сколько секунд брать от каждого клипа
+STOCK_MAX_STRETCH = 1.8              # горизонтальные клипы обрезаются по центру и растягиваются; сильнее — уже мыльно
 FONTS_DIR = ROOT / "fonts"
 FONT_NAME = "Montserrat ExtraBold"   # шрифт из папки fonts/
 SUB_FONT_SIZE = 88

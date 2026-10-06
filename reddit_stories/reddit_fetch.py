@@ -7,6 +7,7 @@
 """
 import hashlib
 import html
+import itertools
 import json
 import re
 import time
@@ -129,7 +130,8 @@ def top_comments(comments: list[dict]) -> list[dict]:
     good = [c for c in comments
             if c["author"] not in ("", "AutoModerator")
             and lo <= len(c["selftext"]) <= hi
-            and c["selftext"] not in ("[removed]", "[deleted]")]
+            and c["selftext"] not in ("[removed]", "[deleted]")
+            and "http" not in c["selftext"]]   # ответ картинкой или гифкой без неё непонятен
     # RSS не говорит, ответ это на пост или на другой комментарий, и не даёт рейтинг — берём из Arctic Shift
     try:
         r = requests.get(ARCTIC_COMMENTS, params={"ids": ",".join(c["id"] for c in good),
@@ -150,7 +152,7 @@ def top_comments(comments: list[dict]) -> list[dict]:
 def _common_ok(p: dict) -> bool:
     if p["over_18"] or p["kind"] != "t3":
         return False
-    if p["score"] is not None and p["score"] < config.MIN_SCORE:
+    if p["score"] is not None and p["score"] < config.SUB_MIN_SCORE.get(p["subreddit"].lower(), config.MIN_SCORE):
         return False
     # апдейты обычно непонятны без первой части
     return not re.search(r"\bupdate\b", p["title"], re.I)
@@ -164,7 +166,9 @@ def is_story(p: dict) -> bool:
 
 
 def is_discussion(p: dict) -> bool:
-    return _common_ok(p) and len(p["selftext"]) < config.MIN_CHARS and p["title"].rstrip().endswith("?")
+    title = p["title"].rstrip()
+    return (_common_ok(p) and len(p["selftext"]) < config.MIN_CHARS
+            and title.endswith("?") and len(title) >= config.MIN_TITLE_CHARS)
 
 
 def load_seen() -> set[str]:
@@ -210,8 +214,13 @@ def stories():
 
 
 def discussions():
-    """Ещё не использованные обсуждения: вопрос + лучшие ответы из комментариев."""
-    for p in _feeds(config.DISCUSSION_SUBREDDITS, is_discussion, config.DISCUSSION_PER_SUB):
+    """Ещё не использованные обсуждения: вопрос + лучшие ответы из комментариев.
+
+    Русскоязычные и переводные идут по очереди, начиная с русскоязычных.
+    """
+    feeds = [_feeds(subs, is_discussion, config.DISCUSSION_PER_SUB)
+             for subs in (config.RU_DISCUSSION_SUBREDDITS, config.DISCUSSION_SUBREDDITS) if subs]
+    for p in (p for group in itertools.zip_longest(*feeds) for p in group if p):
         try:
             _, comments = fetch_thread(p["id"])
         except Exception as e:

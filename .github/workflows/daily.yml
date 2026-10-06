@@ -31,6 +31,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          ELEVENLABS_VOICE_ID_F: ${{ secrets.ELEVENLABS_VOICE_ID_F }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
         run: python main.py daily --n 2
       - name: Запомнить использованные посты и темы

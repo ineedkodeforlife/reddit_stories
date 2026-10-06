@@ -110,16 +110,27 @@ def cmd_scripts(args):
     print(f"Готово сценариев: {made}. Дальше: python main.py render")
 
 
-def _voice(job: Path, script: str) -> list[dict]:
-    """Озвучка с кешем: повторно платим только если текст изменился."""
-    h = hashlib.md5(f"{script}|{config.MAX_PAUSE}|{config.SPEED}".encode()).hexdigest()
+def _voice(job: Path, segments: list[tuple[str, str]]) -> list[dict]:
+    """Озвучка с кешем: повторно платим только если текст изменился.
+
+    segments — куски текста по порядку, у каждого свой голос ("m" / "f").
+    """
+    script = " ".join(text for text, _ in segments)
+    voices = "".join(g for _, g in segments)
+    h = hashlib.md5(f"{script}|{voices}|{config.MAX_PAUSE}|{config.SPEED}".encode()).hexdigest()
     wfile, audio = job / "words.json", job / "voice.mp3"
     if wfile.exists() and audio.exists():
         cached = json.loads(wfile.read_text(encoding="utf-8"))
         if cached.get("hash") == h and all("pos" in w for w in cached["words"]):
             return cached["words"]
     print("  озвучка...")
-    words = tts.synthesize(script, audio)
+    files = [job / f"voice_{i}.mp3" for i in range(len(segments))]
+    chunks = [tts.synthesize(text, f, gender) for (text, gender), f in zip(segments, files)]
+    # склеиваем куски и переводим время и позиции слов в общие для всего текста
+    words, t0, pos0 = [], 0.0, 0
+    for (text, _), chunk, dur in zip(segments, chunks, rnd.join_voice(files, audio)):
+        words += [{**w, "start": w["start"] + t0, "end": w["end"] + t0, "pos": w["pos"] + pos0} for w in chunk]
+        t0, pos0 = t0 + dur, pos0 + len(text) + 1
     words = rnd.trim_pauses(audio, words)
     # ролик должен уложиться в MAX_SECONDS: если озвучка длиннее — ускоряем её сильнее обычного
     limit = config.MAX_SECONDS - rnd.TAIL - 0.3
@@ -149,14 +160,15 @@ def cmd_render(args):
         s = json.loads((job / "script.json").read_text(encoding="utf-8"))
         print(f"→ {job.name}: {s['title']}")
         try:
+            pops = None
             if s.get("comments"):   # обсуждение: карточки Reddit вместо субтитров
-                words = _voice(job, cards.build_script(s))
-                cards.build(job, s, words, rnd.duration(job / "voice.mp3") + rnd.TAIL)
+                words = _voice(job, cards.voice_segments(s))
+                pops = cards.build(job, s, words, rnd.duration(job / "voice.mp3") + rnd.TAIL)
             else:
-                words = _voice(job, s["script"])
+                words = _voice(job, [(s["script"], config.NARRATOR)])
                 subtitles.write_ass(words, s["title"], job / "subs.ass")
             print("  монтаж...")
-            out = rnd.render(job, cards=bool(s.get("comments")))
+            out = rnd.render(job, pops)
         except Exception as e:
             print(f"  ошибка: {e}")
             continue

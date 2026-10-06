@@ -177,12 +177,12 @@ def save_seen(seen: set[str]) -> None:
     config.SEEN_FILE.write_text(json.dumps(sorted(seen)), encoding="utf-8")
 
 
-def _pick(posts: list[dict], seen: set[str], ok, taken: dict) -> list[dict]:
-    """Не больше PER_SUB постов с каждого саба (чтобы один саб не забивал всё)."""
+def _pick(posts: list[dict], seen: set[str], ok, taken: dict, per_sub: int) -> list[dict]:
+    """Не больше per_sub постов с каждого саба (чтобы один саб не забивал всё)."""
     out = []
     for p in posts:
         sub = p["subreddit"].lower()
-        if p["id"] in seen or not ok(p) or taken.get(sub, 0) >= config.PER_SUB:
+        if p["id"] in seen or not ok(p) or taken.get(sub, 0) >= per_sub:
             continue
         taken[sub] = taken.get(sub, 0) + 1
         seen.add(p["id"])
@@ -190,18 +190,18 @@ def _pick(posts: list[dict], seen: set[str], ok, taken: dict) -> list[dict]:
     return out
 
 
-def _feeds(subs: list[str], ok):
+def _feeds(subs: list[str], ok, per_sub: int = config.PER_SUB):
     """Сначала общий топ всех сабов одним запросом, потом — по одному сабу (медленно из-за лимита)."""
     seen, taken = load_seen(), {}
     for group in [subs] + ([[s] for s in subs] if len(subs) > 1 else []):
-        if len(group) == 1 and taken.get(group[0].lower(), 0) >= config.PER_SUB:
+        if len(group) == 1 and taken.get(group[0].lower(), 0) >= per_sub:
             continue
         try:
             posts = fetch_top(group)
         except Exception as e:
             print(f"[reddit] r/{'+'.join(group)}: {e}")
             continue
-        yield from _pick(posts, seen, ok, taken)
+        yield from _pick(posts, seen, ok, taken, per_sub)
 
 
 def stories():
@@ -211,7 +211,7 @@ def stories():
 
 def discussions():
     """Ещё не использованные обсуждения: вопрос + лучшие ответы из комментариев."""
-    for p in _feeds(config.DISCUSSION_SUBREDDITS, is_discussion):
+    for p in _feeds(config.DISCUSSION_SUBREDDITS, is_discussion, config.DISCUSSION_PER_SUB):
         try:
             _, comments = fetch_thread(p["id"])
         except Exception as e:

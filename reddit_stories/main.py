@@ -2,7 +2,7 @@
 Пайплайн Reddit -> русский сценарий -> озвучка -> вертикальное видео.
 
   python main.py scripts --n 5              # набрать 5 новых сценариев (дёшево, без озвучки)
-  python main.py scripts --mode discussions # только обсуждения (вопрос + лучшие комментарии)
+  python main.py scripts --mode stories     # истории с субтитрами вместо обсуждений (или all — вперемешку)
   python main.py scripts --id <url или id>  # сценарий по конкретному посту
   python main.py render                     # озвучить и смонтировать все сценарии без видео
   python main.py render out/abc123          # только конкретный
@@ -94,13 +94,17 @@ def cmd_scripts(args):
         s["kind"] = "discussion" if p.get("comments") else "story"
         s["source"] = {"id": p["id"], "subreddit": p["subreddit"], "score": p["score"], "author": p["author"],
                        "url": "https://www.reddit.com" + p["permalink"], "title": p["title"]}
-        job = config.OUT_DIR / p["id"]
-        job.mkdir(parents=True, exist_ok=True)
-        (job / "script.json").write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"  ✓ {job / 'script.json'}  (оценка {s.get('score')}, {len(s['script'].split())} слов)")
+        parts = cards.split_parts(s)   # много сильных ответов — выходит две части, у каждой своя папка
+        for part in parts:
+            if part.get("part"):
+                part["script"] = cards.build_script(part)
+            job = config.OUT_DIR / (p["id"] + (f"_{part['part']}" if part.get("part") else ""))
+            job.mkdir(parents=True, exist_ok=True)
+            (job / "script.json").write_text(json.dumps(part, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"  ✓ {job / 'script.json'}  (оценка {s.get('score')}, {len(part['script'].split())} слов)")
         topics.append({"id": p["id"], "topic": s.get("topic") or s["title"], "title": p["title"]})
         config.TOPICS_FILE.write_text(json.dumps(topics, ensure_ascii=False, indent=1), encoding="utf-8")
-        made += 1
+        made += len(parts)
         if made >= args.n:
             break
     print(f"Готово сценариев: {made}. Дальше: python main.py render")
@@ -108,7 +112,7 @@ def cmd_scripts(args):
 
 def _voice(job: Path, script: str) -> list[dict]:
     """Озвучка с кешем: повторно платим только если текст изменился."""
-    h = hashlib.md5(script.encode()).hexdigest()
+    h = hashlib.md5(f"{script}|{config.MAX_PAUSE}|{config.SPEED}".encode()).hexdigest()
     wfile, audio = job / "words.json", job / "voice.mp3"
     if wfile.exists() and audio.exists():
         cached = json.loads(wfile.read_text(encoding="utf-8"))
@@ -116,17 +120,20 @@ def _voice(job: Path, script: str) -> list[dict]:
             return cached["words"]
     print("  озвучка...")
     words = tts.synthesize(script, audio)
-    # ролик должен уложиться в MAX_SECONDS: если озвучка длиннее — ускоряем её
+    words = rnd.trim_pauses(audio, words)
+    # ролик должен уложиться в MAX_SECONDS: если озвучка длиннее — ускоряем её сильнее обычного
     limit = config.MAX_SECONDS - rnd.TAIL - 0.3
-    factor = rnd.duration(audio) / limit
+    before = rnd.duration(audio)
+    factor = max(before / limit, config.SPEED)
     if factor > config.MAX_SPEEDUP:
         audio.unlink()
         raise RuntimeError(f"текст слишком длинный: {len(script.split())} слов, "
                            f"сократи script примерно до {config.MAX_WORDS}")
-    if factor > 1:
+    if factor > config.SPEED:
         print(f"  ускоряю озвучку в {factor:.2f} раза, чтобы уложиться в {config.MAX_SECONDS} c")
+    if factor > 1:
         rnd.speed_up(audio, factor)
-        scale = rnd.duration(audio) / (limit * factor)   # по факту, а не по расчёту
+        scale = rnd.duration(audio) / before   # по факту, а не по расчёту
         words = [{**w, "start": w["start"] * scale, "end": w["end"] * scale} for w in words]
     wfile.write_text(json.dumps({"hash": h, "words": words}, ensure_ascii=False), encoding="utf-8")
     return words
@@ -154,7 +161,8 @@ def cmd_render(args):
             print(f"  ошибка: {e}")
             continue
         tags = " ".join("#" + t.lstrip("#") for t in s.get("hashtags", []))
-        (job / "caption.txt").write_text(f"{s.get('caption', '')}\n\n{tags}\n", encoding="utf-8")
+        part = f"Часть {s['part']}. " if s.get("part") else ""
+        (job / "caption.txt").write_text(f"{part}{s.get('caption', '')}\n\n{tags}\n", encoding="utf-8")
         print(f"  ✓ {out}  ({rnd.duration(out):.0f} c)")
 
 
@@ -187,7 +195,7 @@ def main():
     a = sub.add_parser("scripts")
     a.add_argument("--n", type=int, default=3)
     a.add_argument("--id", nargs="*")
-    a.add_argument("--mode", choices=["all", "stories", "discussions"], default="all")
+    a.add_argument("--mode", choices=["all", "stories", "discussions"], default="discussions")
     a.set_defaults(func=cmd_scripts)
     b = sub.add_parser("render")
     b.add_argument("jobs", nargs="*")
@@ -195,7 +203,7 @@ def main():
     sub.add_parser("send").set_defaults(func=cmd_send)
     c = sub.add_parser("daily")
     c.add_argument("--n", type=int, default=2)
-    c.add_argument("--mode", choices=["all", "stories", "discussions"], default="all")
+    c.add_argument("--mode", choices=["all", "stories", "discussions"], default="discussions")
     c.set_defaults(func=cmd_daily, id=None, jobs=[])
     args = ap.parse_args()
     for stream in (sys.stdout, sys.stderr):   # консоль Windows не умеет «→» и «✓» в cp866/cp1251

@@ -17,6 +17,7 @@ PAD, GUTTER, GAP = 34, 76, 28        # поля, колонка со стрел�
 
 WHITE, TEXT, GREY, BLUE = (255, 255, 255, 255), (34, 34, 34), (136, 136, 136), (51, 102, 153)
 ARROW, ARROW_UP = (198, 198, 198), (255, 139, 96)
+ORANGE, BADGE_H = (255, 69, 0, 255), 76   # плашка «Часть 1»
 
 # обычный и жирный шрифт с кириллицей: Windows, Linux (GitHub Actions), запасной — из fonts/
 FONTS = {
@@ -51,6 +52,16 @@ def _segments(s: dict) -> list[list[str]]:
 def build_script(s: dict) -> str:
     """Текст озвучки: вопрос, затем комментарии подряд."""
     return " ".join(sent for seg in _segments(s) for sent in seg)
+
+
+def split_parts(s: dict) -> list[dict]:
+    """Ответов хватает на два ролика — делим пополам: в каждой части тот же вопрос и своя половина ответов."""
+    comments = s.get("comments") or []
+    if len(comments) < 2 * config.PART_COMMENTS[0]:
+        return [s]
+    half = (len(comments) + 1) // 2
+    return [{**s, "comments": chunk, "part": i}
+            for i, chunk in enumerate((comments[:half], comments[half:]), 1)]
 
 
 def _score(n) -> str:
@@ -130,6 +141,10 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> Path:
     question = _Card(probe, q_header, segs[0], "Комментарии    Поделиться    Сохранить",
                      50, True, _score(src.get("score")).replace(" тыс.", "k"))
 
+    # подпись «Часть 1» / «Часть 2» над вопросом, если ролик разбит на части
+    badge = f"Часть {s['part']}" if s.get("part") else ""
+    badge_h = BADGE_H + GAP if badge else 0
+
     cards = []
     for c, seg in zip(s["comments"], segs[1:]):
         meta = f"  {_score(c['score'])} очков  ·  " if c.get("score") is not None else "  ·  "
@@ -137,12 +152,12 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> Path:
                   (meta + f"{random.randint(2, 23)} ч. назад", GREY, False)]
         for size in (46, 42, 38, 34, 30):   # длинный комментарий — уменьшаем шрифт, пока не влезет
             card = _Card(probe, header, seg, "Ответить    Поделиться    Пожаловаться    Сохранить", size, False)
-            if TOP + question.height + GAP + card.height <= BOTTOM:
+            if TOP + badge_h + question.height + GAP + card.height <= BOTTOM:
                 break
         cards.append(card)
 
     # блок из вопроса и самого высокого комментария ставим чуть выше центра безопасной зоны
-    free = BOTTOM - TOP - question.height - GAP - max(c.height for c in cards)
+    free = BOTTOM - TOP - badge_h - question.height - GAP - max(c.height for c in cards)
     top = TOP + int(max(free, 0) * 0.4)
 
     out_dir = job / "cards"
@@ -154,9 +169,14 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> Path:
     def frame(t: float, card: _Card | None, upto: int) -> None:
         img = Image.new("RGBA", (config.W, config.H), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        question.draw(d, top, 99)
+        if badge:
+            f = _font(40, True)
+            w = d.textlength(badge, font=f) + 64
+            d.rounded_rectangle([X, top, X + w, top + BADGE_H], radius=BADGE_H // 2, fill=ORANGE)
+            d.text((X + w / 2, top + BADGE_H / 2), badge, font=f, fill=WHITE, anchor="mm")
+        question.draw(d, top + badge_h, 99)
         if card:
-            card.draw(d, top + question.height + GAP, upto)
+            card.draw(d, top + badge_h + question.height + GAP, upto)
         name = f"cards/{len(frames):03d}.png"
         img.save(job / name)
         frames.append((t, name))

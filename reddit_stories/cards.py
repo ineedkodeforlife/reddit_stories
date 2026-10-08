@@ -166,11 +166,11 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> list[float]:
 
     probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
     src = s.get("source", {})
-    q_header = [(f"r/{src.get('subreddit', 'AskReddit')}", TEXT, True)]
+    q_header = [(src.get("label") or f"r/{src.get('subreddit', 'AskReddit')}", TEXT, True)]
     if src.get("author"):
         q_header.append((f"  •  u/{src['author']}", GREY, False))
-    question = _Card(probe, q_header, segs[0], "Комментарии    Поделиться    Сохранить",
-                     50, True, _score(src.get("score")).replace(" тыс.", "k"))
+    q_footer, q_score = "Комментарии    Поделиться    Сохранить", _score(src.get("score")).replace(" тыс.", "k")
+    question = _Card(probe, q_header, segs[0], q_footer, 50, True, q_score)
 
     # подпись «Часть 1» / «Часть 2» над вопросом, если ролик разбит на части
     badge = f"Часть {s['part']}" if s.get("part") else ""
@@ -199,7 +199,16 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> list[float]:
         old.unlink()
     frames = []   # (время показа, файл)
 
-    def frame(t: float, card: _Card | None, upto: int) -> None:
+    # первый кадр: пока звучит вопрос, он показан крупно по центру экрана — так ролик цепляет с первой секунды
+    hook = None
+    if config.HOOK:
+        for size in (84, 76, 68, 60):   # длинный вопрос — шрифт поменьше
+            hook = _Card(probe, q_header, segs[0], q_footer, size, True, q_score)
+            if badge_h + hook.height <= 1000:
+                break
+        hook_top = TOP + (BOTTOM - TOP - badge_h - hook.height) // 2
+
+    def frame(t: float, card: _Card | None, upto: int, question: _Card = question, top: int = top) -> None:
         img = Image.new("RGBA", (config.W, config.H), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         if badge:
@@ -214,7 +223,10 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> list[float]:
         img.save(job / name)
         frames.append((t, name))
 
-    frame(0.0, None, 0)
+    if hook:
+        frame(0.0, None, 0, hook, hook_top)
+    else:
+        frame(0.0, None, 0)
     pops = []
     for card, row in zip(cards, starts[1:]):
         for k, t in enumerate(row):

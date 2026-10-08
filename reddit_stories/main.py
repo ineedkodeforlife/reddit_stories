@@ -15,10 +15,12 @@ import itertools
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 import cards
 import config
+import otvet
 import reddit_fetch
 import render as rnd
 import rewrite
@@ -27,9 +29,24 @@ import telegram
 import tts
 
 
+def _discussions():
+    """Обсуждения из всех источников по очереди: Ответы Mail.ru, русские сабы, переводные сабы.
+
+    Каждый день очередь начинается со следующего источника, чтобы при --n 2 не выходило одно и то же.
+    """
+    feeds = []
+    if config.OTVET_PAGES:
+        feeds.append(otvet.discussions())
+    feeds += [reddit_fetch.discussions(subs)
+              for subs in (config.RU_DISCUSSION_SUBREDDITS, config.DISCUSSION_SUBREDDITS) if subs]
+    shift = date.today().toordinal() % len(feeds)
+    for group in itertools.zip_longest(*(feeds[shift:] + feeds[:shift])):
+        yield from (p for p in group if p)
+
+
 def _mixed():
     """Истории и обсуждения по очереди."""
-    for pair in itertools.zip_longest(reddit_fetch.stories(), reddit_fetch.discussions()):
+    for pair in itertools.zip_longest(reddit_fetch.stories(), _discussions()):
         yield from (p for p in pair if p)
 
 
@@ -63,14 +80,14 @@ def cmd_scripts(args):
     if args.id:
         posts = (reddit_fetch.fetch_post(i) for i in args.id)
     else:
-        posts = {"stories": reddit_fetch.stories, "discussions": reddit_fetch.discussions,
+        posts = {"stories": reddit_fetch.stories, "discussions": _discussions,
                  "all": _mixed}[args.mode]()
     seen = reddit_fetch.load_seen()
     topics = load_topics()
     made = 0
     for p in posts:
         kind = "обсуждение" if p.get("comments") else "история"
-        print(f"→ r/{p['subreddit']} | {kind} | {p['score'] or '?'}↑ | {p['title'][:70]}")
+        print(f"→ {p.get('label') or 'r/' + p['subreddit']} | {kind} | {p['score'] or '?'}↑ | {p['title'][:70]}")
         dup = None if args.id else _same_title(p["title"], topics)
         if dup:
             print(f"  пропуск: повтор темы «{dup}»")
@@ -93,7 +110,8 @@ def cmd_scripts(args):
             continue
         s["kind"] = "discussion" if p.get("comments") else "story"
         s["source"] = {"id": p["id"], "subreddit": p["subreddit"], "score": p["score"], "author": p["author"],
-                       "url": "https://www.reddit.com" + p["permalink"], "title": p["title"]}
+                       "label": p.get("label") or f"r/{p['subreddit']}",   # подпись источника на карточке вопроса
+                       "url": p.get("url") or "https://www.reddit.com" + p["permalink"], "title": p["title"]}
         parts = cards.split_parts(s)   # много сильных ответов — выходит две части, у каждой своя папка
         for part in parts:
             if part.get("part"):

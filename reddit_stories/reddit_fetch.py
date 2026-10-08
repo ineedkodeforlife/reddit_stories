@@ -7,7 +7,6 @@
 """
 import hashlib
 import html
-import itertools
 import json
 import re
 import time
@@ -213,14 +212,9 @@ def stories():
     yield from _feeds(config.SUBREDDITS, is_story)
 
 
-def discussions():
-    """Ещё не использованные обсуждения: вопрос + лучшие ответы из комментариев.
-
-    Русскоязычные и переводные идут по очереди, начиная с русскоязычных.
-    """
-    feeds = [_feeds(subs, is_discussion, config.DISCUSSION_PER_SUB)
-             for subs in (config.RU_DISCUSSION_SUBREDDITS, config.DISCUSSION_SUBREDDITS) if subs]
-    for p in (p for group in itertools.zip_longest(*feeds) for p in group if p):
+def discussions(subs: list[str]):
+    """Ещё не использованные обсуждения из этих сабов: вопрос + лучшие ответы из комментариев."""
+    for p in _feeds(subs, is_discussion, config.DISCUSSION_PER_SUB):
         try:
             _, comments = fetch_thread(p["id"])
         except Exception as e:

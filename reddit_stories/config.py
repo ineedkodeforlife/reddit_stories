@@ -39,10 +39,20 @@ MIN_CHARS, MAX_CHARS = 700, 6000
 PER_SUB = 3                 # сколько лучших постов брать с каждого саба (чтобы AITA не забивал всё)
 
 # --- обсуждения: вопрос из заголовка + лучшие ответы из комментариев ---
-DISCUSSION_SUBREDDITS = ["AskReddit", "AskMen", "AskWomen", "NoStupidQuestions"]
+DISCUSSION_SUBREDDITS = ["AskReddit", "AskMen", "AskWomen", "NoStupidQuestions",
+                         "TooAfraidToAsk", "AskOldPeople", "CasualConversation"]
 # русскоязычные обсуждения идут через одно с переводными; пустой список — только переводные
 RU_DISCUSSION_SUBREDDITS = ["rusAskReddit"]
-SUB_MIN_SCORE = {"rusaskreddit": 150}   # свой порог рейтинга для небольших сабов (имя в нижнем регистре)
+# свой порог рейтинга для небольших сабов (имя в нижнем регистре)
+SUB_MIN_SCORE = {"rusaskreddit": 150, "askoldpeople": 300, "casualconversation": 300}
+# Ответы Mail.ru: страницы, с которых берутся вопросы (пустой список — источник выключен)
+OTVET_PAGES = ["popular", "debated", "space/jokes/debated", "space/other/debated",
+               "space/psychology/debated", "space/truelove/debated", "space/men/debated"]
+# вопросы с этими словами в заголовке не берём сразу, без запроса к модели: на сайте много подросткового мусора
+OTVET_SKIP_WORDS = ["лет", "13", "14", "15", "16", "школьни", "секс", "дроч", "дилдо", "карм", "гуру", "забан",
+                    "мейл", "mail", "ответ", "молитв", "бог", "путин", "украин", "войн"]
+OTVET_MIN_REPLIES = 8       # вопросы, на которые ответили меньше, не берём
+OTVET_COMMENT_CHARS = (15, 300)   # там отвечают короче, чем на Reddit, и ответы идут в ролик без сокращений
 MIN_TITLE_CHARS = 20        # короче — обычно подпись к картинке («Это правда?»), без неё вопрос непонятен
 DISCUSSION_PER_SUB = 6      # кандидатов с саба больше, чем у историй: «американские» темы отсеиваются
 COMMENT_CHARS = (40, 450)   # мин. и макс. длина комментария: в ролик до 55 с влезают только короткие
@@ -115,6 +125,7 @@ BACKGROUND_STYLE = "random"
 MAX_SECONDS = 55                     # ролик строго не длиннее этого
 MAX_WORDS = 130                      # сценарий длиннее — просим модель сократить
 MAX_SPEEDUP = 1.3                    # во сколько раз можно ускорить озвучку, чтобы уложиться
+HOOK = True                          # обсуждения: пока звучит вопрос, он показан крупно по центру экрана
 TITLE_SECONDS = 3.0                  # сколько висит плашка с заголовком в начале
 
 OUT_DIR = ROOT / "out"

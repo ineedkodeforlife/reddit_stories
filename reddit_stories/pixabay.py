@@ -3,6 +3,7 @@
 Скачанные клипы лежат в cache/pixabay/ и повторно не качаются.
 """
 import random
+import re
 import time
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def clips(total: float) -> list[Path]:
         raise RuntimeError(f"Pixabay {r.status_code}: {r.text[:200]}")
     videos = [v for v in r.json().get("hits", [])
               if v.get("duration", 0) >= config.STOCK_CLIP_SECONDS / 2
-              and all(w in v.get("tags", "").lower() for w in query.lower().split())]
+              and set(query.lower().split()) <= set(re.findall(r"\w+", v.get("tags", "").lower()))]   # целые слова
     random.shuffle(videos)
     videos.sort(key=lambda v: v["videos"]["medium"]["width"] > v["videos"]["medium"]["height"])
     print(f"  фон с Pixabay: «{query}», найдено {len(videos)}")

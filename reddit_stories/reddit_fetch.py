@@ -133,9 +133,13 @@ def top_comments(comments: list[dict]) -> list[dict]:
             and "http" not in c["selftext"]]   # ответ картинкой или гифкой без неё непонятен
     # RSS не говорит, ответ это на пост или на другой комментарий, и не даёт рейтинг — берём из Arctic Shift
     try:
-        r = requests.get(ARCTIC_COMMENTS, params={"ids": ",".join(c["id"] for c in good),
-                                                  "fields": "id,score,parent_id"},
-                         headers={"User-Agent": config.REDDIT_USER_AGENT}, timeout=30)
+        for attempt in range(2):   # архив изредка отвечает ошибкой на тот же запрос, что через секунду проходит
+            r = requests.get(ARCTIC_COMMENTS, params={"ids": ",".join(c["id"] for c in good),
+                                                      "fields": "id,score,parent_id"},
+                             headers={"User-Agent": config.REDDIT_USER_AGENT}, timeout=30)
+            if r.ok:
+                break
+            time.sleep(3)
         r.raise_for_status()
         info = {d["id"]: d for d in r.json()["data"]}
         good = [c for c in good if info.get(c["id"], {}).get("parent_id", "t3_").startswith("t3_")]
@@ -164,10 +168,17 @@ def is_story(p: dict) -> bool:
     return _common_ok(p) and config.MIN_CHARS <= len(text) <= config.MAX_CHARS
 
 
+def banned(title: str) -> bool:
+    """Есть ли в заголовке слово из SKIP_TITLE_WORDS: короткие сверяются целиком, длинные — как начало слова."""
+    words = set(re.findall(r"\w+", title.lower()))
+    return any(w == s if len(s) <= 4 else w.startswith(s) for w in words for s in config.SKIP_TITLE_WORDS)
+
+
 def is_discussion(p: dict) -> bool:
     title = p["title"].rstrip()
     return (_common_ok(p) and len(p["selftext"]) < config.MIN_CHARS
-            and title.endswith("?") and len(title) >= config.MIN_TITLE_CHARS)
+            and title.endswith("?") and len(title) >= config.MIN_TITLE_CHARS
+            and not banned(title))
 
 
 def load_seen() -> set[str]:

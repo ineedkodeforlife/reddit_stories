@@ -111,7 +111,7 @@ def discussions():
         pid, title = f"otvet{q['id']}", " ".join((q.get("title") or "").split())
         if (pid in seen or q.get("repliesCount", 0) < config.OTVET_MIN_REPLIES
                 or not title.endswith("?") or len(title) < config.MIN_TITLE_CHARS
-                or any(w in title.lower() for w in config.OTVET_SKIP_WORDS)):
+                or any(w in title.lower() for w in config.OTVET_SKIP_WORDS) or reddit_fetch.banned(title)):
             continue
         try:
             comments = _answers(q["id"])

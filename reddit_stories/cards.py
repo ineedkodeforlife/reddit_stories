@@ -69,7 +69,8 @@ def voice_segments(s: dict) -> list[tuple[str, str]]:
 def split_parts(s: dict) -> list[dict]:
     """Ответов хватает на два ролика — делим пополам: в каждой части тот же вопрос и своя половина ответов."""
     comments = s.get("comments") or []
-    if len(comments) < 2 * config.PART_COMMENTS[0]:
+    # делим, только когда ответов хватает на два ролика и в один они по длине не влезают
+    if len(comments) < 2 * config.PART_COMMENTS[0] or len(build_script(s).split()) <= config.MAX_WORDS:
         return [s]
     half = (len(comments) + 1) // 2
     return [{**s, "comments": chunk, "part": i, "outro": config.OUTRO_NEXT if i == 1 else s.get("outro")}

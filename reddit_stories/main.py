@@ -190,7 +190,7 @@ def cmd_render(args):
         except Exception as e:
             print(f"  ошибка: {e}")
             continue
-        tags = " ".join("#" + t.lstrip("#") for t in s.get("hashtags", []))
+        tags = " ".join("#" + "".join(t.lstrip("#").split()) for t in s.get("hashtags", []))   # хэштег — без пробелов
         part = f"Часть {s['part']}. " if s.get("part") else ""
         (job / "caption.txt").write_text(f"{part}{s.get('caption', '')}\n\n{tags}\n", encoding="utf-8")
         print(f"  ✓ {out}  ({rnd.duration(out):.0f} c)")

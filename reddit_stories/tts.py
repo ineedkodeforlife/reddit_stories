@@ -1,9 +1,11 @@
 """Озвучка с таймингами слов (для субтитров Whisper не нужен).
 
-ElevenLabs, если в .env есть ключ и голос, иначе бесплатный Edge TTS.
+Yandex SpeechKit, если в .env есть его ключ, затем ElevenLabs (ключ и голос), иначе бесплатный Edge TTS.
 """
 import asyncio
 import base64
+import json
+import re
 import time
 from pathlib import Path
 
@@ -65,6 +67,23 @@ async def _edge_stream(text: str, out_mp3: Path, voice: str) -> list[dict]:
     return words
 
 
+def _locate(words: list[dict], text: str) -> list[dict]:
+    """Движки отдают слова без пунктуации и без позиций: находим каждое слово в исходном тексте
+    и возвращаем ему знаки препинания — по ним субтитры режутся на фразы, а карточки ищут начало предложения."""
+    low, pos = text.lower().replace("ё", "е"), 0
+    for w in words:
+        i = low.find(w["text"].lower().replace("ё", "е"), pos)
+        w["pos"] = i if i >= 0 else pos
+        if i < 0:
+            continue
+        pos = i + len(w["text"])
+        w["text"] = text[i:pos]
+        while pos < len(text) and not text[pos].isspace() and not text[pos].isalnum():
+            w["text"] += text[pos]
+            pos += 1
+    return words
+
+
 def _edge(text: str, out_mp3: Path, voice: str) -> list[dict]:
     # сервис Edge иногда отвечает пустым аудио, особенно на серию запросов подряд — ждём и повторяем
     for attempt in range(5):
@@ -75,25 +94,73 @@ def _edge(text: str, out_mp3: Path, voice: str) -> list[dict]:
             if attempt == 4:
                 raise
             time.sleep(5 * (attempt + 1))
-    # Edge отдаёт слова без пунктуации — возвращаем её из исходного текста,
-    # по ней субтитры режутся на фразы
-    pos = 0
-    for w in words:
-        i = text.find(w["text"], pos)
-        w["pos"] = i if i >= 0 else pos
-        if i < 0:
+    return _locate(words, text)
+
+
+def _yandex(text: str, out_mp3: Path, voice: str, role: str) -> list[dict]:
+    """Yandex SpeechKit API v3: один запрос — один кусок до YANDEX_MAX_CHARS символов, ответ — поток JSON
+    с кусками аудио и таймингами слов."""
+    hints = [{"voice": voice}, {"speed": config.YANDEX_SPEED}] + ([{"role": role}] if role else [])
+    r = requests.post(
+        "https://tts.api.cloud.yandex.net/tts/v3/utteranceSynthesis",
+        headers={"Authorization": f"Api-Key {config.YANDEX_API_KEY}"},
+        json={"text": text, "hints": hints,
+              "outputAudioSpec": {"containerAudio": {"containerAudioType": "MP3"}},
+              "loudnessNormalizationType": "LUFS"},
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Yandex SpeechKit {r.status_code}: {r.text[:300]}")
+    audio, words = b"", []
+    for line in r.text.splitlines():   # по сообщению на строку, каждое завёрнуто в result
+        if not line.strip():
             continue
-        pos = i + len(w["text"])
-        while pos < len(text) and not text[pos].isspace() and not text[pos].isalnum():
-            w["text"] += text[pos]
-            pos += 1
-    return words
+        msg = json.loads(line)
+        if "error" in msg:
+            raise RuntimeError(f"Yandex SpeechKit: {str(msg['error'])[:300]}")
+        msg = msg.get("result", msg)
+        audio += base64.b64decode((msg.get("audioChunk") or {}).get("data") or "")
+        for w in msg.get("wordTimings") or []:
+            start = int(w.get("startMs") or 0) / 1000
+            words.append({"text": (w.get("word") or "").replace("+", ""), "start": start,   # «+» — знак ударения
+                          "end": start + int(w.get("lengthMs") or 0) / 1000})
+    if not audio:
+        raise RuntimeError("Yandex SpeechKit вернул пустое аудио")
+    out_mp3.write_bytes(audio)
+    return _locate([w for w in words if w["text"]], text)
+
+
+def engine() -> str:
+    """Каким движком идёт озвучка: Yandex SpeechKit, если есть его ключ, затем ElevenLabs, иначе Edge."""
+    if config.YANDEX_API_KEY:
+        return "yandex"
+    return "eleven" if config.ELEVEN_API_KEY and config.ELEVEN_VOICE_ID else "edge"
+
+
+def pieces(text: str) -> list[str]:
+    """Куски текста, которые движок озвучивает одним запросом. У Яндекса запрос ограничен
+    YANDEX_MAX_CHARS символами, поэтому длинный текст режем по границам предложений, а если надо — слов."""
+    if engine() != "yandex":
+        return [text]
+    out, cur = [], ""
+    for sent in re.findall(r"\S.*?(?:[.!?…]+(?=\s|$)|$)", text, re.S):
+        for word in ([sent] if len(sent) <= config.YANDEX_MAX_CHARS else sent.split()):
+            if cur and len(cur) + 1 + len(word) > config.YANDEX_MAX_CHARS:
+                out.append(cur)
+                cur = ""
+            cur = f"{cur} {word}".strip()
+    return out + [cur] if cur else out
 
 
 def synthesize(text: str, out_mp3: Path, gender: str = "") -> list[dict]:
     """gender — "m" или "f": каким голосом читать; пусто — голосом рассказчика."""
     gender = gender if gender in config.EDGE_VOICES else config.NARRATOR
-    if config.ELEVEN_API_KEY and config.ELEVEN_VOICE_ID:
+    if engine() == "yandex":
+        try:
+            return _yandex(text, out_mp3, *config.YANDEX_VOICES[gender])
+        except Exception as e:   # кончились деньги или сервис лежит — ролик всё равно должен выйти
+            print(f"  {e} — озвучиваю через Edge")
+    elif engine() == "eleven":
         voice = config.ELEVEN_VOICE_ID_F if gender == "f" and config.ELEVEN_VOICE_ID_F else config.ELEVEN_VOICE_ID
         return _eleven(text, out_mp3, voice)
     return _edge(text, out_mp3, config.EDGE_VOICES[gender])

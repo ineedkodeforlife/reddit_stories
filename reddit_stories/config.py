@@ -17,6 +17,7 @@ GROQ_API_KEY = _key("GROQ_API_KEY")
 ELEVEN_API_KEY = _key("ELEVENLABS_API_KEY")
 ELEVEN_VOICE_ID = _key("ELEVENLABS_VOICE_ID")
 ELEVEN_VOICE_ID_F = _key("ELEVENLABS_VOICE_ID_F")   # женский голос для ответов; нет — всё читает основной
+YANDEX_API_KEY = _key("YANDEX_API_KEY")
 TELEGRAM_BOT_TOKEN = _key("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _key("TELEGRAM_CHAT_ID")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "")
@@ -83,6 +84,11 @@ EDGE_VOICES = {"m": "ru-RU-DmitryNeural", "f": "ru-RU-SvetlanaNeural"}
 NARRATOR = "m"
 EDGE_RATE = "+12%"
 ELEVEN_MODEL = "eleven_multilingual_v2"
+# Yandex SpeechKit (нужен YANDEX_API_KEY в .env): голос и амплуа для каждого пола.
+# Список голосов и амплуа: aistudio.yandex.ru/docs/ru/speechkit/tts/voices
+YANDEX_VOICES = {"m": ("alexander", "good"), "f": ("lera", "friendly")}
+YANDEX_SPEED = 1.1
+YANDEX_MAX_CHARS = 240      # запрос длиннее 250 символов Яндекс не принимает; каждый запрос стоит около 16 копеек
 VOICE_SETTINGS = {
     "stability": 0.45,
     "similarity_boost": 0.8,

@@ -135,13 +135,15 @@ def _voice(job: Path, segments: list[tuple[str, str]]) -> list[dict]:
     """
     script = " ".join(text for text, _ in segments)
     voices = "".join(g for _, g in segments)
-    h = hashlib.md5(f"{script}|{voices}|{config.MAX_PAUSE}|{config.SPEED}".encode()).hexdigest()
+    h = hashlib.md5(f"{script}|{voices}|{tts.engine()}|{config.MAX_PAUSE}|{config.SPEED}".encode()).hexdigest()
     wfile, audio = job / "words.json", job / "voice.mp3"
     if wfile.exists() and audio.exists():
         cached = json.loads(wfile.read_text(encoding="utf-8"))
         if cached.get("hash") == h and all("pos" in w for w in cached["words"]):
             return cached["words"]
     print("  озвучка...")
+    # длинный кусок движок может не принять целиком — режем его на части того же голоса
+    segments = [(piece, gender) for text, gender in segments for piece in tts.pieces(text)]
     files = [job / f"voice_{i}.mp3" for i in range(len(segments))]
     chunks = [tts.synthesize(text, f, gender) for (text, gender), f in zip(segments, files)]
     # склеиваем куски и переводим время и позиции слов в общие для всего текста

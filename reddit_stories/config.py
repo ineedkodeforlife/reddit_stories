@@ -124,6 +124,10 @@ PIXABAY_API_KEY = _key("PIXABAY_API_KEY")
 # эти запросы проверены: по ним много съёмок растекающейся краски и чернил
 STOCK_QUERIES = ["ink in water", "liquid paint", "motion paint", "soap bubbles", "acrylic paint", "fluid art",
                  "ink drops", "bubbles macro", "oil bubbles", "smoke abstract", "abstract liquid"]
+# клипы с этими тегами не берём: это съёмки людей, природы и быта, а не «залипательная» абстракция
+STOCK_SKIP_TAGS = ["man", "woman", "people", "person", "girl", "boy", "child", "worker", "painter",
+                   "house", "roof", "building", "city", "street", "nature", "forest", "river", "lake",
+                   "beach", "winter", "snow", "landscape", "sky", "animal", "kitchen", "car"]
 # недавно использованные клипы: пока есть свежие, эти в ролик не идут; файл хранится в репозитории
 STOCK_USED_FILE = ROOT / "stock_used.json"
 STOCK_USED_KEEP = 600                # сколько последних клипов помнить (на ролик уходит около пяти)
@@ -148,6 +152,10 @@ HOST = True
 HOST_SIZE = 230
 ANSWER_SIZE = 190           # размер персонажей на карточке с ответом (девочка и мужчина)
 HOST_DIR = ROOT / "host"
+COUNTER = True                       # на карточке ответа метка «2 из 5»
+POP_IN = True                        # карточка ответа «выпрыгивает», а не возникает мгновенно
+LOOP = True                          # последний кадр повторяет первый: ролик незаметно начинается заново
+TEASER = "Дослушайте до последнего ответа."   # затравка после вопроса, если модель не придумала свою
 HOOK = True                          # обсуждения: пока звучит вопрос, он показан крупно по центру экрана
 TITLE_SECONDS = 3.0                  # сколько висит плашка с заголовком в начале
 

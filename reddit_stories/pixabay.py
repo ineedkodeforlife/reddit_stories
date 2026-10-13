@@ -31,8 +31,12 @@ def _link(video: dict) -> str | None:
     return best["url"]
 
 
-def clips(total: float) -> list[Path]:
-    """Клипы по случайному запросу из STOCK_QUERIES, которых хватит на total секунд.
+def _tags(video: dict) -> set[str]:
+    return set(re.findall(r"\w+", video.get("tags", "").lower()))
+
+
+def clips(lengths: list[float]) -> list[Path]:
+    """Клипы по случайному запросу из STOCK_QUERIES: по одному на каждый отрезок фона (длины в секундах).
 
     Клипы берутся в случайном порядке, недавно использованные (STOCK_USED_FILE) — в последнюю очередь,
     чтобы фон не повторялся от ролика к ролику.
@@ -53,16 +57,18 @@ def clips(total: float) -> list[Path]:
         raise RuntimeError(f"Pixabay {r.status_code}: {r.text[:200]}")
     videos = [v for v in r.json().get("hits", [])
               if v.get("duration", 0) >= config.STOCK_CLIP_SECONDS / 2
-              and set(query.lower().split()) <= set(re.findall(r"\w+", v.get("tags", "").lower()))]   # целые слова
+              and set(query.lower().split()) <= _tags(v)             # все слова запроса есть в тегах
+              and not _tags(v) & set(config.STOCK_SKIP_TAGS)]        # и нет тегов обычной съёмки
     used = json.loads(config.STOCK_USED_FILE.read_text(encoding="utf-8")) if config.STOCK_USED_FILE.exists() else []
     random.shuffle(videos)
-    videos.sort(key=lambda v: v["id"] in used)   # сортировка устойчивая: внутри групп порядок остаётся случайным
+    # сортировка устойчивая, внутри групп порядок остаётся случайным: сначала свежие и достаточно длинные
+    videos.sort(key=lambda v: (v["id"] in used, v["duration"] < max(lengths)))
     print(f"  фон с Pixabay: «{query}», найдено {len(videos)}, из них свежих {sum(v['id'] not in used for v in videos)}")
 
     DIR.mkdir(parents=True, exist_ok=True)
-    out, have = [], 0.0
+    out = []
     for v in videos:
-        if have >= total:
+        if len(out) >= len(lengths):
             break
         path, link = DIR / f"{v['id']}.mp4", _link(v)
         if not link:
@@ -77,6 +83,5 @@ def clips(total: float) -> list[Path]:
             tmp.replace(path)
         out.append(path)
         used = [i for i in used if i != v["id"]] + [v["id"]]
-        have += min(v["duration"], config.STOCK_CLIP_SECONDS)
     config.STOCK_USED_FILE.write_text(json.dumps(used[-config.STOCK_USED_KEEP:]), encoding="utf-8")
     return out

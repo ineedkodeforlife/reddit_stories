@@ -115,15 +115,28 @@ def trim_pauses(audio: Path, words: list[dict]) -> list[dict]:
     return [{**w, "start": shift(w["start"]), "end": shift(w["end"])} for w in words]
 
 
-def stock_background(job: Path, dur: float) -> Path | None:
-    """Склеивает фон bg.mp4 из нескольких клипов Pixabay. None — ключа нет или что-то не вышло."""
+def stock_background(job: Path, dur: float, cuts: list[float] | None = None) -> Path | None:
+    """Склеивает фон bg.mp4 из нескольких клипов Pixabay. None — ключа нет или что-то не вышло.
+
+    cuts — моменты появления карточек: фон меняется вместе с каждым ответом.
+    Без них клипы просто сменяются каждые STOCK_CLIP_SECONDS секунд.
+    """
     try:
-        clips = pixabay.clips(dur)
+        edges = [0.0] + [c for c in cuts or [] if 0 < c < dur] + [dur]
+        lengths = []
+        for length in (b - a for a, b in zip(edges, edges[1:])):
+            if lengths and (length < 2 or lengths[-1] < 2):   # слишком короткий отрезок приклеиваем к соседнему
+                lengths[-1] += length
+            else:
+                lengths.append(length)
+        if not cuts:
+            lengths = [float(config.STOCK_CLIP_SECONDS)] * (int(dur // config.STOCK_CLIP_SECONDS) + 1)
+        clips = pixabay.clips(lengths)
         if not clips:
             return None
         cmd, graph = [_ffmpeg(), "-y", "-loglevel", "error"], ""
-        for i, clip in enumerate(clips):   # от каждого клипа берём начало, чтобы картинка чаще менялась
-            cmd += ["-t", str(config.STOCK_CLIP_SECONDS), "-i", str(clip.resolve())]
+        for i, (clip, length) in enumerate(zip(clips, lengths)):   # короткий клип повторяется, пока отрезок не кончится
+            cmd += ["-stream_loop", "-1", "-t", f"{length:.3f}", "-i", str(clip.resolve())]
             graph += (f"[{i}:v]scale={config.W}:{config.H}:force_original_aspect_ratio=increase,"
                       f"crop={config.W}:{config.H},fps={config.FPS},setsar=1[v{i}];")
         graph += "".join(f"[v{i}]" for i in range(len(clips))) + f"concat=n={len(clips)}:v=1:a=0,lutyuv=y=val*{config.STOCK_DIM}[v]"
@@ -176,7 +189,7 @@ def render(job: Path, pops: list[float] | None = None) -> Path:
     bgs = [p for p in config.BACKGROUNDS_DIR.iterdir() if p.suffix.lower() in VIDEO_EXT]
     style = None
     # свои видео из backgrounds/ → клипы с Pixabay → нарисованный фон
-    bg = random.choice(bgs) if bgs else stock_background(job, dur)
+    bg = random.choice(bgs) if bgs else stock_background(job, dur, pops)
     if bg:
         bg_dur = duration(bg)
         if bg_dur < dur:

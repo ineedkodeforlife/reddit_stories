@@ -36,13 +36,21 @@ MOUTHS = {"a": (0.40, 0.60, 0.19), "o": (0.435, 0.565, 0.15), "u": (0.455, 0.545
           "e": (0.38, 0.62, 0.10), "c": (0.43, 0.57, 0.05)}
 
 
+REACTIONS = ("wow", "lol", "omg")   # реакции ведущего на ответ: удивление, смех, «не могу на это смотреть»
+
+
+def _base(state: str) -> str:
+    """Состояние — форма рта или реакция; тильда на конце — глаза закрыты, крышка — голова приподнята:
+    "a", "closed~", "lol^"."""
+    return state.rstrip("~^")
+
+
 def _mouth_of(state: str) -> str:
-    """Состояние — форма рта и, если глаза закрыты, тильда на конце: "a", "closed~"."""
-    return {"open": "a", "blink": "closed"}.get(state.rstrip("~"), state.rstrip("~"))
+    return {"open": "a", "blink": "closed", "wow": "o", "lol": "a", "omg": "c"}.get(_base(state), _base(state))
 
 
 def _blinking(state: str) -> bool:
-    return state.endswith("~") or state == "blink"
+    return "~" in state or state == "blink"
 
 
 class _Pen:
@@ -107,12 +115,33 @@ def _cat(state: str, size: int) -> Image.Image:
     for x in (0.40, 0.50, 0.60):                                                     # полоски на лбу
         d.line(p.pts((x, 0.19), (x, 0.29)), fill=FUR_DARK, width=w * 2)
     d.ellipse(p.box(0.30, 0.56, 0.70, 0.90), fill=WHITE)                             # светлая мордочка
-    p.eyes(state, 0.46)
+    mood = _base(state)
+    if mood == "wow":                                                                # глаза круглые, зрачки-точки
+        for cx in (0.33, 0.67):
+            d.ellipse(p.box(cx - 0.13, 0.31, cx + 0.13, 0.59), fill=WHITE, outline=LINE, width=w)
+            d.ellipse(p.box(cx - 0.04, 0.41, cx + 0.04, 0.49), fill=BLACK)
+    elif mood == "lol":                                                              # глаза-дужки, как при смехе
+        for cx in (0.33, 0.67):
+            d.arc(p.box(cx - 0.10, 0.40, cx + 0.10, 0.58), 200, 340, fill=LINE, width=w * 2)
+    elif mood == "omg":
+        p.eyes("blink", 0.46)
+    else:
+        p.eyes(state, 0.46)
     d.polygon(p.pts((0.46, 0.61), (0.54, 0.61), (0.50, 0.66)), fill=PINK, outline=LINE)   # нос
-    if not p.mouth(state, 0.67):
+    if mood == "lol":                                                                # рот до ушей
+        d.chord(p.box(0.36, 0.56, 0.64, 0.88), 0, 180, fill=LINE)
+        d.ellipse(p.box(0.45, 0.78, 0.55, 0.87), fill=PINK)
+    elif not p.mouth(state, 0.67):
         d.arc(p.box(0.40, 0.60, 0.50, 0.74), 0, 180, fill=LINE, width=w)
         d.arc(p.box(0.50, 0.60, 0.60, 0.74), 0, 180, fill=LINE, width=w)
-    p.hands(FUR)
+    if mood == "omg":                                                                # закрывает глаза лапами
+        for x0 in (0.18, 0.56):
+            d.rounded_rectangle(p.box(x0, 0.34, x0 + 0.26, 0.58), radius=p.n // 16, fill=FUR, outline=LINE, width=w)
+            for k in (1, 2):
+                x = x0 + 0.26 * k / 3
+                d.line(p.pts((x, 0.36), (x, 0.45)), fill=LINE, width=w)
+    else:
+        p.hands(FUR)
     return p.done()
 
 
@@ -192,6 +221,8 @@ def sprite(who: str, state: str) -> Image.Image:
     shape = _mouth_of(state)
     names = ["blink"] if _blinking(state) and shape == "closed" else []   # своё моргание есть только с закрытым ртом
     names += [shape] + (["open"] if shape != "closed" else []) + ["closed"]
+    if _base(state) in REACTIONS:   # своя картинка реакции (wow.png, lol.png, omg.png), а без неё — обычное лицо
+        names = [_base(state), "closed"]
     for name in names:
         path = folder / f"{name}.png"
         if path.exists():
@@ -201,7 +232,26 @@ def sprite(who: str, state: str) -> Image.Image:
 
 def lift(state: str) -> int:
     """На сколько пикселей поднять голову: на широко открытых звуках она чуть кивает вверх."""
-    return LIFT if _mouth_of(state) in ("a", "o") else 0
+    if state.endswith("^"):
+        return LIFT * 2
+    return LIFT if _mouth_of(state) in ("a", "o") and _base(state) != "lol" else 0
+
+
+def react(events: list[tuple[float, str]], reactions: list[tuple[float, float, str]]) -> list[tuple[float, str]]:
+    """Вставляет в шкалу состояний реакции (начало, конец, какая). От смеха голова подпрыгивает."""
+    out = [e for e in events if not any(a <= e[0] < b for a, b, _ in reactions)]
+    for a, b, kind in reactions:
+        if kind == "lol":
+            t, up = a, False
+            while t < b:
+                out.append((t, "lol^" if up else "lol"))
+                t, up = t + 0.13, not up
+        else:
+            out.append((a, kind))
+        before = [st for at, st in events if at <= b]
+        out.append((b, before[-1] if before else "closed"))   # после реакции — то, что было бы без неё
+    out.sort(key=lambda e: e[0])
+    return [e for i, e in enumerate(out) if i == 0 or e[1] != out[i - 1][1]]
 
 
 def _syllables(word: str) -> list[tuple[str, str]]:

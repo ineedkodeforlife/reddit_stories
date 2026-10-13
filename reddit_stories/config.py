@@ -75,7 +75,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")
 LLM_MODELS = list(dict.fromkeys([LLM_MODEL, "qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]))
 LLM_TEMPERATURE = 0.4       # выше — живее язык, но больше опечаток и выдумок
 LLM_REASONING = "low"       # сколько модель gpt-oss «думает» перед ответом: low / medium / high
-MIN_LLM_SCORE = 7           # обсуждения, которые сама модель оценила ниже, не берём
+MIN_LLM_SCORE = 8           # обсуждения, которые сама модель оценила ниже, не берём
 
 # --- озвучка ---
 # Есть ключ и голос ElevenLabs в .env — озвучивает ElevenLabs, иначе бесплатный Edge TTS.

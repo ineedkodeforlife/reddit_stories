@@ -10,6 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 import config
+import host
 
 X, CARD_W = 40, config.W - 80        # карточка почти на всю ширину
 TOP, BOTTOM = 230, 1500              # безопасная зона TikTok: сверху и снизу интерфейс приложения
@@ -18,6 +19,7 @@ PAD, GUTTER, GAP = 34, 76, 28        # поля, колонка со стрел�
 WHITE, TEXT, GREY, BLUE = (255, 255, 255, 255), (34, 34, 34), (136, 136, 136), (51, 102, 153)
 ARROW, ARROW_UP = (198, 198, 198), (255, 139, 96)
 ORANGE, BADGE_H = (255, 69, 0, 255), 76   # плашка «Часть 1»
+HOST_OVERLAP = 34                          # на сколько ведущий заходит на карточку вопроса
 
 # обычный и жирный шрифт с кириллицей: Windows, Linux (GitHub Actions), запасной — из fonts/
 FONTS = {
@@ -155,15 +157,18 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> list[float]:
     segs = _segments(s)
     script = build_script(s)
 
-    # когда начинается каждое предложение: время первого слова, стоящего в тексте не раньше него
-    starts, pos = [], 0
+    # когда начинается каждое предложение: время первого слова, стоящего в тексте не раньше него;
+    # заодно запоминаем, какой кусок текста занимает каждый сегмент
+    starts, spans, pos = [], [], 0
     for seg in segs:
-        row = []
+        row, begin = [], None
         for sent in seg:
             at = script.index(sent, pos)
+            begin = at if begin is None else begin
             pos = at + len(sent)
             row.append(next((w["start"] for w in words if w.get("pos", -1) >= at), total))
         starts.append(row)
+        spans.append((begin, pos))
 
     probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
     src = s.get("source", {})
@@ -173,9 +178,12 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> list[float]:
     q_footer, q_score = "Комментарии    Поделиться    Сохранить", _score(src.get("score")).replace(" тыс.", "k")
     question = _Card(probe, q_header, segs[0], q_footer, 50, True, q_score)
 
-    # подпись «Часть 1» / «Часть 2» над вопросом, если ролик разбит на части
+    # над вопросом — полоса для подписи «Часть 1» / «Часть 2» (слева) и ведущего (справа)
     badge = f"Часть {s['part']}" if s.get("part") else ""
-    badge_h = BADGE_H + GAP if badge else 0
+    band = max(BADGE_H + GAP if badge else 0, config.HOST_SIZE - HOST_OVERLAP if config.HOST else 0)
+    # между вопросом и ответом — место для того, кто этот ответ читает (девочка или мужчина)
+    gap = max(GAP, config.ANSWER_SIZE - HOST_OVERLAP + 8 if config.HOST else 0)
+    speakers = [g for _, g in voice_segments(s)][1:len(s["comments"]) + 1]
 
     cards = []
     for c, seg in zip(s["comments"], segs[1:]):
@@ -184,56 +192,92 @@ def build(job: Path, s: dict, words: list[dict], total: float) -> list[float]:
                   (meta + f"{random.randint(2, 23)} ч. назад", GREY, False)]
         for size in (46, 42, 38, 34, 30):   # длинный комментарий — уменьшаем шрифт, пока не влезет
             card = _Card(probe, header, seg, "Ответить    Поделиться    Пожаловаться    Сохранить", size, False)
-            if TOP + badge_h + question.height + GAP + card.height <= BOTTOM:
+            if TOP + band + question.height + gap + card.height <= BOTTOM:
                 break
         cards.append(card)
     if s.get("outro"):   # концовка идёт последним сегментом, после всех комментариев
         cards.append(_Outro(probe, segs[-1]))
 
     # блок из вопроса и самого высокого комментария ставим чуть выше центра безопасной зоны
-    free = BOTTOM - TOP - badge_h - question.height - GAP - max(c.height for c in cards)
+    free = BOTTOM - TOP - band - question.height - gap - max(c.height for c in cards)
     top = TOP + int(max(free, 0) * 0.4)
-
-    out_dir = job / "cards"
-    out_dir.mkdir(exist_ok=True)
-    for old in out_dir.glob("*.png"):
-        old.unlink()
-    frames = []   # (время показа, файл)
 
     # первый кадр: пока звучит вопрос, он показан крупно по центру экрана — так ролик цепляет с первой секунды
     hook = None
     if config.HOOK:
         for size in (84, 76, 68, 60):   # длинный вопрос — шрифт поменьше
             hook = _Card(probe, q_header, segs[0], q_footer, size, True, q_score)
-            if badge_h + hook.height <= 1000:
+            if band + hook.height <= 1000:
                 break
-        hook_top = TOP + (BOTTOM - TOP - badge_h - hook.height) // 2
+        hook_top = TOP + (BOTTOM - TOP - band - hook.height) // 2
 
-    def frame(t: float, card: _Card | None, upto: int, question: _Card = question, top: int = top) -> None:
+    scenes = []   # (время показа, картинка без персонажей, верх карточки вопроса, верх карточки ответа, кто отвечает)
+
+    def scene(t: float, card: _Card | None, upto: int, question: _Card = question, top: int = top) -> None:
         img = Image.new("RGBA", (config.W, config.H), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
+        q_top = top + band
         if badge:
             f = _font(40, True)
-            w = d.textlength(badge, font=f) + 64
-            d.rounded_rectangle([X, top, X + w, top + BADGE_H], radius=BADGE_H // 2, fill=ORANGE)
-            d.text((X + w / 2, top + BADGE_H / 2), badge, font=f, fill=WHITE, anchor="mm")
-        question.draw(d, top + badge_h, 99)
-        if card:
-            card.draw(d, top + badge_h + question.height + GAP, upto)
-        name = f"cards/{len(frames):03d}.png"
-        img.save(job / name)
-        frames.append((t, name))
+            w, y = d.textlength(badge, font=f) + 64, q_top - GAP - BADGE_H
+            d.rounded_rectangle([X, y, X + w, y + BADGE_H], radius=BADGE_H // 2, fill=ORANGE)
+            d.text((X + w / 2, y + BADGE_H / 2), badge, font=f, fill=WHITE, anchor="mm")
+        question.draw(d, q_top, 99)
+        c_top, who = None, None
+        if isinstance(card, _Outro):   # концовку читает ведущий, поэтому она вплотную к вопросу
+            card.draw(d, q_top + question.height + GAP, upto)
+        elif card:
+            c_top, who = q_top + question.height + gap, speakers[cards.index(card)]
+            card.draw(d, c_top, upto)
+        scenes.append((t, img, q_top, c_top, who))
 
     if hook:
-        frame(0.0, None, 0, hook, hook_top)
+        scene(0.0, None, 0, hook, hook_top)
     else:
-        frame(0.0, None, 0)
+        scene(0.0, None, 0)
     pops = []
     for card, row in zip(cards, starts[1:]):
         for k, t in enumerate(row):
-            frame(max(t - 0.05, frames[-1][0] + 0.05), card, k)
+            scene(max(t - 0.05, scenes[-1][0] + 0.05), card, k)
             if k == 0:
-                pops.append(frames[-1][0])
+                pops.append(scenes[-1][0])
+
+    # ведущий говорит вопрос и концовку (их читает рассказчик), остальное время слушает
+    # отвечающие говорят свои ответы; на экране всегда только один из них, так что им хватает общей шкалы
+    states, replies = [(0.0, "closed")], [(0.0, "closed")]
+    if config.HOST:
+        mine = [spans[0]] + ([spans[-1]] if s.get("outro") else [])
+        spoken = [w for w in words if any(a <= w.get("pos", -1) < b for a, b in mine)]
+        states += host.timeline(spoken, total)
+        theirs = spans[1:len(s["comments"]) + 1]
+        replies += host.timeline([w for w in words if any(a <= w.get("pos", -1) < b for a, b in theirs)], total)
+
+    out_dir = job / "cards"
+    out_dir.mkdir(exist_ok=True)
+    for old in out_dir.glob("*.png"):
+        old.unlink()
+    frames, saved = [], {}   # (время показа, файл); уже сохранённые сочетания «сцена + состояния персонажей»
+    for t in sorted({t for t, *_ in scenes} | {t for t, _ in states + replies}):
+        i = max(k for k, sc in enumerate(scenes) if sc[0] <= t)
+        _, img, q_top, c_top, who = scenes[i]
+        state = [st for at, st in states if at <= t][-1]
+        reply = [st for at, st in replies if at <= t][-1] if who else ""
+        if (i, state, reply) not in saved:
+            if config.HOST:   # каждый сидит на правом верхнем углу своей карточки, руки лежат на её краю
+                img = img.copy()
+                img.alpha_composite(host.sprite("host", state),
+                                    (X + CARD_W - config.HOST_SIZE - 36,
+                                     q_top - config.HOST_SIZE + HOST_OVERLAP - host.lift(state)))
+                if who:
+                    img.alpha_composite(host.sprite(who, reply),
+                                        (X + CARD_W - config.ANSWER_SIZE - 36,
+                                         c_top - config.ANSWER_SIZE + HOST_OVERLAP - host.lift(reply)))
+            saved[i, state, reply] = f"cards/{len(saved):03d}.png"
+            img.save(job / saved[i, state, reply], compress_level=1)
+        if frames and t - frames[-1][0] < 1 / config.FPS:   # короче одного кадра видео всё равно не покажется
+            frames[-1] = (frames[-1][0], saved[i, state, reply])
+        else:
+            frames.append((t, saved[i, state, reply]))
 
     lines = []
     for (t, name), (t_next, _) in zip(frames, frames[1:] + [(total + 1, "")]):

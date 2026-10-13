@@ -122,7 +122,11 @@ BACKGROUNDS_DIR = ROOT / "backgrounds"
 PIXABAY_API_KEY = _key("PIXABAY_API_KEY")
 # поиск Pixabay неточный, поэтому берутся только видео, у которых все слова запроса есть в тегах;
 # эти запросы проверены: по ним много съёмок растекающейся краски и чернил
-STOCK_QUERIES = ["ink in water", "liquid paint", "motion paint", "soap bubbles"]
+STOCK_QUERIES = ["ink in water", "liquid paint", "motion paint", "soap bubbles", "acrylic paint", "fluid art",
+                 "ink drops", "bubbles macro", "oil bubbles", "smoke abstract", "abstract liquid"]
+# недавно использованные клипы: пока есть свежие, эти в ролик не идут; файл хранится в репозитории
+STOCK_USED_FILE = ROOT / "stock_used.json"
+STOCK_USED_KEEP = 600                # сколько последних клипов помнить (на ролик уходит около пяти)
 STOCK_DIM = 0.78                     # яркость стокового фона (1 — как есть): на светлом фоне белые карточки теряются
 STOCK_CLIP_SECONDS = 8               # сколько секунд брать от каждого клипа
 STOCK_MAX_STRETCH = 1.8              # горизонтальные клипы обрезаются по центру и растягиваются; сильнее — уже мыльно

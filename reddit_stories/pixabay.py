@@ -2,6 +2,7 @@
 
 Скачанные клипы лежат в cache/pixabay/ и повторно не качаются.
 """
+import json
 import random
 import re
 import time
@@ -31,13 +32,17 @@ def _link(video: dict) -> str | None:
 
 
 def clips(total: float) -> list[Path]:
-    """Клипы по случайному запросу из STOCK_QUERIES, которых хватит на total секунд. Вертикальные — в первую очередь."""
+    """Клипы по случайному запросу из STOCK_QUERIES, которых хватит на total секунд.
+
+    Клипы берутся в случайном порядке, недавно использованные (STOCK_USED_FILE) — в последнюю очередь,
+    чтобы фон не повторялся от ролика к ролику.
+    """
     if not config.PIXABAY_API_KEY:
         return []
     query = random.choice(config.STOCK_QUERIES)
     for attempt in range(3):   # соединение иногда рвётся — повтор помогает
         try:
-            r = requests.get(API, params={"key": config.PIXABAY_API_KEY, "q": query, "per_page": 100,
+            r = requests.get(API, params={"key": config.PIXABAY_API_KEY, "q": query, "per_page": 200,
                                           "safesearch": "true"}, timeout=30)
             break
         except requests.RequestException as e:
@@ -49,9 +54,10 @@ def clips(total: float) -> list[Path]:
     videos = [v for v in r.json().get("hits", [])
               if v.get("duration", 0) >= config.STOCK_CLIP_SECONDS / 2
               and set(query.lower().split()) <= set(re.findall(r"\w+", v.get("tags", "").lower()))]   # целые слова
+    used = json.loads(config.STOCK_USED_FILE.read_text(encoding="utf-8")) if config.STOCK_USED_FILE.exists() else []
     random.shuffle(videos)
-    videos.sort(key=lambda v: v["videos"]["medium"]["width"] > v["videos"]["medium"]["height"])
-    print(f"  фон с Pixabay: «{query}», найдено {len(videos)}")
+    videos.sort(key=lambda v: v["id"] in used)   # сортировка устойчивая: внутри групп порядок остаётся случайным
+    print(f"  фон с Pixabay: «{query}», найдено {len(videos)}, из них свежих {sum(v['id'] not in used for v in videos)}")
 
     DIR.mkdir(parents=True, exist_ok=True)
     out, have = [], 0.0
@@ -70,5 +76,7 @@ def clips(total: float) -> list[Path]:
                         f.write(chunk)
             tmp.replace(path)
         out.append(path)
+        used = [i for i in used if i != v["id"]] + [v["id"]]
         have += min(v["duration"], config.STOCK_CLIP_SECONDS)
+    config.STOCK_USED_FILE.write_text(json.dumps(used[-config.STOCK_USED_KEEP:]), encoding="utf-8")
     return out
